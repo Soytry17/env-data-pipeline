@@ -1,0 +1,9 @@
+[2026-07-07 17:22:27] [INFO] [PipelineTest]   fetched 'Phnom Penh' → temp: 28.3°C  humidity: 83%
+[2026-07-07 17:22:28] [INFO] [PipelineTest]   fetched 'Siem Reap' → temp: 28.0°C  humidity: 88%
+[2026-07-07 17:22:29] [INFO] [PipelineTest]   fetched 'Sihanoukville' → temp: 26.7°C  humidity: 93%
+[2026-07-07 17:22:29] [INFO] [PipelineTest] Extracted 3 location(s) from Open-Meteo API
+[2026-07-07 17:22:29] [INFO] [PipelineTest] Loaded 3 rows into DataFrame
+[2026-07-07 17:22:29] [INFO] [PipelineTest] Cast all numeric columns
+[2026-07-07 17:22:29] [INFO] [PipelineTest] Parsed extracted_at to datetime
+[2026-07-07 17:22:29] [INFO] [PipelineTest] Added heat_index and comfort_level columns
+[2026-07-07 17:22:29] [SUCCESS] [PipelineTest] Transform complete — in: 3 | dropped: 0 | out: 3

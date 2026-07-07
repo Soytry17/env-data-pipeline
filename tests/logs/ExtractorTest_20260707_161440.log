@@ -1,0 +1,4 @@
+[2026-07-07 16:14:43] [INFO] [ExtractorTest]   fetched 'Phnom Penh' → temp: 28.4°C  humidity: 81%
+[2026-07-07 16:14:45] [INFO] [ExtractorTest]   fetched 'Siem Reap' → temp: 29.1°C  humidity: 83%
+[2026-07-07 16:14:48] [INFO] [ExtractorTest]   fetched 'Sihanoukville' → temp: 27.9°C  humidity: 82%
+[2026-07-07 16:14:48] [INFO] [ExtractorTest] Extracted 3 location(s) from Open-Meteo API
