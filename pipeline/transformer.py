@@ -33,11 +33,6 @@ class BaseTransformer(ABC):
 
 
 class WeatherTransformer(BaseTransformer):
-    """
-    Cleans and enriches raw weather rows using pandas + NumPy.
-    Each step is one method — same pattern as your old transformer,
-    but now operating on a whole DataFrame instead of row by row.
-    """
 
     # valid ranges for each measurement
     VALID_RANGES = {
@@ -50,11 +45,9 @@ class WeatherTransformer(BaseTransformer):
     def transform(self, rows):
         self._summary["total_in"] = len(rows)
 
-        # ── Step 1: load into DataFrame
         df = pd.DataFrame(rows)
         self._log("info", f"Loaded {len(df)} rows into DataFrame")
 
-        # ── Step 2: run cleaning steps in order
         df = self._cast_types(df)
         df = self._parse_timestamps(df)
         df = self._fill_missing(df)
@@ -70,7 +63,6 @@ class WeatherTransformer(BaseTransformer):
         # return as list of dicts — same contract as old pipeline
         return df.to_dict(orient="records")
 
-    # ─── STEP 1: types ────────────────────────────────────
     def _cast_types(self, df):
         numeric_cols = ["temperature", "humidity", "wind_speed",
                         "precipitation", "weather_code",
@@ -81,7 +73,6 @@ class WeatherTransformer(BaseTransformer):
         self._log("info", "Cast all numeric columns")
         return df
 
-    # ─── STEP 2: timestamps ───────────────────────────────
     def _parse_timestamps(self, df):
         df["extracted_at"] = pd.to_datetime(
             df["extracted_at"], errors="coerce"
@@ -89,7 +80,6 @@ class WeatherTransformer(BaseTransformer):
         self._log("info", "Parsed extracted_at to datetime")
         return df
 
-    # ─── STEP 5: fill missing values ─────────────────────
     def _fill_missing(self, df):
         fill_map = {
             "temperature":   df["temperature"].median(),
@@ -99,19 +89,14 @@ class WeatherTransformer(BaseTransformer):
         }
         for col, fill_val in fill_map.items():
             if col in df.columns:
-                nulls = df[col].isna().sum()
-                if nulls > 0:
-                    self._log("info", f"Filling {nulls} null(s) in '{col}' with {fill_val}")
+                temp = df[col].isna().sum()
+                if temp > 0:
+                    self._log("info", f"Filling {temp} null(s) in '{col}' with {fill_val}")
                     df[col] = df[col].fillna(fill_val)
         return df
 
-    # ─── STEP 6: weather description ─────────────────────
     def _add_weather_description(self, df):
-        """
-        Map WMO weather codes to human-readable descriptions.
-        np.select() is the NumPy equivalent of a chain of if/elif —
-        vectorized, fast, and clean.
-        """
+
         code = df["weather_code"]
 
         conditions = [
@@ -140,17 +125,12 @@ class WeatherTransformer(BaseTransformer):
         )
         return df
 
-    # ─── STEP 7: heat index ───────────────────────────────
     def _add_heat_index(self, df):
-        """
-        Simplified heat index — how hot it actually feels.
-        This is a vectorized NumPy calculation on the whole column at once,
-        not a loop. Much faster than row-by-row in pandas .apply()
-        """
-        T = df["temperature"].to_numpy()    # NumPy array
-        H = df["humidity"].to_numpy()       # NumPy array
 
-        # Steadman heat index formula (simplified)
+        T = df["temperature"].to_numpy()
+        H = df["humidity"].to_numpy()
+
+        # Steadman heat index formula (simplified) | Rothfusz Heat Index
         heat_index = (
             -8.78469475556
             + 1.61139411 * T
@@ -173,6 +153,7 @@ class WeatherTransformer(BaseTransformer):
             df["heat_index"].between(41, 54),
             df["heat_index"] > 54,
         ]
+
         labels = ["Comfortable", "Caution", "Extreme Caution",
                   "Danger", "Extreme Danger"]
         df["comfort_level"] = np.select(conditions, labels, default="Unknown")
@@ -180,13 +161,11 @@ class WeatherTransformer(BaseTransformer):
         self._log("info", "Added heat_index and comfort_level columns")
         return df
 
-    # ─── STEP 8: pipeline metadata ───────────────────────
     def _add_pipeline_metadata(self, df):
         df["processed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         df["pipeline_version"] = "1.0.0"
         return df
 
-    # ─── STEP 9: reorder columns ─────────────────────────
     def _reorder_columns(self, df):
         order = [
             "location", "latitude", "longitude",
@@ -200,7 +179,6 @@ class WeatherTransformer(BaseTransformer):
         final_cols = [c for c in order if c in df.columns]
         return df[final_cols]
 
-    # ─── SUMMARY ─────────────────────────────────────────
     def _log_summary(self, df):
         s = self._summary
         self._log("success",

@@ -8,10 +8,8 @@ extractor   = APIExtractor(source="Open-Meteo", logger=logger)
 validator   = WeatherValidator(logger=logger)
 transformer = WeatherTransformer(logger=logger)
 
-# Stage 1 — extract
 raw_rows = extractor.extract()
 
-# Stage 2 — validate
 valid_rows, result = validator.validate(raw_rows)
 
 if not result.passed():

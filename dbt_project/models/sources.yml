@@ -1,0 +1,41 @@
+version: 2
+
+sources:
+  - name: bronze
+    schema: bronze
+    description: "Raw ingested data from the pipeline"
+    tables:
+      - name: weather
+        description: "Raw weather readings from Open-Meteo API"
+        columns:
+          - name: id
+            description: "Auto-incremented primary key"
+            tests:
+              - unique
+              - not_null
+          - name: location
+            description: "City name"
+            tests:
+              - not_null
+          - name: extracted_at
+            description: "Timestamp of the API reading"
+            tests:
+              - not_null
+          - name: temperature
+            description: "Temperature in Celsius"
+            tests:
+              - dbt_utils.accepted_range:
+                  min_value: -50
+                  max_value: 60
+          - name: humidity
+            description: "Relative humidity percentage"
+            tests:
+              - dbt_utils.accepted_range:
+                  min_value: 0
+                  max_value: 100
+          - name: wind_speed
+            description: "Wind speed in km/h"
+            tests:
+              - dbt_utils.accepted_range:
+                  min_value: 0
+                  max_value: 200

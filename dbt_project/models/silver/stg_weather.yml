@@ -1,0 +1,35 @@
+version: 2
+
+models:
+  - name: stg_weather
+    description: "Cleaned and deduplicated weather readings — Silver layer"
+    columns:
+      - name: id
+        tests:
+          - unique
+          - not_null
+
+      - name: location
+        tests:
+          - not_null
+
+      - name: extracted_at
+        tests:
+          - not_null
+
+      - name: temperature_c
+        description: "Temperature in Celsius — null if out of valid range"
+
+      - name: humidity_pct
+        description: "Humidity percentage 0–100"
+
+      - name: comfort_level
+        tests:
+          - accepted_values:
+              values:
+                - "Comfortable"
+                - "Caution"
+                - "Extreme Caution"
+                - "Danger"
+                - "Extreme Danger"
+                - "Unknown"

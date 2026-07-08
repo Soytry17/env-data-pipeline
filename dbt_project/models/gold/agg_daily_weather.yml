@@ -1,0 +1,26 @@
+version: 2
+
+models:
+  - name: agg_daily_weather
+    description: "Daily aggregated weather stats per location — Gold layer"
+    columns:
+      - name: location
+        tests:
+          - not_null
+
+      - name: date
+        tests:
+          - not_null
+
+      - name: total_readings
+        description: "Number of readings collected that day"
+
+      - name: day_classification
+        tests:
+          - accepted_values:
+              values:
+                - "Extreme Heat"
+                - "Hot and Humid"
+                - "Warm"
+                - "Mild"
+                - "Cool"
