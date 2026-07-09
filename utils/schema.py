@@ -45,3 +45,20 @@ COMMENT ON SCHEMA silver IS 'Cleaned and deduplicated data — built by dbt';
 COMMENT ON SCHEMA gold   IS 'Aggregated analytics layer — built by dbt';
 COMMENT ON TABLE  bronze.weather IS 'Raw weather readings from Open-Meteo API';
 """
+
+
+def get_or_create_partition(cur, year):
+    """
+    Ensures a partition exists for the given year.
+    Safe to call multiple times — uses IF NOT EXISTS.
+    """
+    table_name = f"bronze.weather_{year}"
+    start_date = f"{year}-01-01"
+    end_date   = f"{year + 1}-01-01"
+
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {table_name}
+        PARTITION OF bronze.weather
+        FOR VALUES FROM ('{start_date}') TO ('{end_date}');
+    """)
+    return table_name

@@ -1,22 +1,40 @@
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from pipeline.extractor import APIExtractor
 from pipeline.validator import WeatherValidator
-from pipeline.transformer import WeatherTransformer
-from utils.logger import Logger
+from pipeline.loader    import PostgreSQLLoader
+from utils.logger       import Logger
 
-logger      = Logger("PipelineTest")
-extractor   = APIExtractor(source="Open-Meteo", logger=logger)
-validator   = WeatherValidator(logger=logger)
-transformer = WeatherTransformer(logger=logger)
+logger    = Logger("LoaderTest")
+extractor = APIExtractor(source_id=1, logger=logger)
+validator = WeatherValidator(logger=logger)
+loader    = PostgreSQLLoader(logger=logger)
 
-raw_rows = extractor.extract()
+# ── Stage 1: Extract
+print("\n── Stage 1: Extract ──────────────────────────")
+rows = extractor.extract()
 
-valid_rows, result = validator.validate(raw_rows)
+# ── Stage 2: Validate
+print("\n── Stage 2: Validate ─────────────────────────")
+valid_rows, result = validator.validate(rows)
+print(f"  passed: {result.passed_rows} / {result.total_rows}")
 
-if not result.passed():
-    print(f"\nWarning: {result.rejected_rows} row(s) rejected")
-    print(f"Rejection rate: {result.rejection_rate()}%")
+# ── Stage 3: Load
+print("\n── Stage 3: Load ─────────────────────────────")
+inserted = loader.load(valid_rows)
+print(f"  inserted: {inserted} rows")
 
-# Stage 3 — transform (only valid rows)
-clean_rows = transformer.transform(valid_rows)
-
-print(f"\nFinal: {len(clean_rows)} clean row(s) ready to load")
+# ── Verify in database
+print("\n── Verify in bronze.weather ──────────────────")
+latest = loader.fetch_latest(limit=5)
+print(f"\n{'─'*80}")
+print(f"  {'Source':<12} {'Location':<22} {'Region':<10} {'Temp':<8} {'Humidity'}")
+print(f"{'─'*80}")
+for row in latest:
+    print(
+        f"  {row[1]:<12} {row[2]:<22} {row[3]:<10} "
+        f"{row[6]:<8} {row[7]}%"
+    )
+print(f"{'─'*80}")

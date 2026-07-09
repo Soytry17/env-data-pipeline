@@ -1,0 +1,59 @@
+version: 2
+
+models:
+  - name: weather_features
+    description: "Machine learning feature table for weather prediction"
+
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - location_id
+            - observation_at
+
+    columns:
+
+      - name: location_id
+        tests:
+          - not_null
+
+      - name: observation_at
+        tests:
+          - not_null
+
+      - name: season
+        tests:
+          - accepted_values:
+              values:
+                - rainy
+                - dry
+
+      - name: is_rainy_season
+        tests:
+          - not_null
+
+      - name: temperature_c
+
+      - name: humidity_pct
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 100
+
+      - name: precipitation_mm
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+      - name: rolling_temp_24h
+
+      - name: rolling_humidity_24h
+
+      - name: temperature_lag_1
+
+      - name: temperature_lag_24
+
+      - name: rainfall_lag_24
+
+      - name: target_temperature_next_day
+
+      - name: target_rainfall_next_day

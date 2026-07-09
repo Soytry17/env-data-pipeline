@@ -1,7 +1,8 @@
-import pandas as pd
-import numpy as np
+# pipeline/validator.py
+
 from dataclasses import dataclass, field
 from typing import List
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -16,28 +17,42 @@ class ValidationResult:
 
     def rejection_rate(self):
         if self.total_rows == 0:
-            return 0
-        return round(self.rejected_rows / self.total_rows * 100, 2)
+            return 0.0
+        return round(self.rejected_rows / self.total_rows * 100, 1)
 
 
 class WeatherValidator:
-    # define schema we need
+    """
+    Responsibility:
+    - Did the API return a valid response?
+    - Is the JSON structure what we expect?
+    - Are required fields present?
+    - Is the HTTP response clean?
 
-    REQUIRED_FIELDS = [
-        "location", "extracted_at",
-        "temperature", "humidity",
-        "wind_speed", "precipitation"
+    NOT responsible for:
+    - Value ranges (dbt handles this)
+    - Null handling (dbt handles this)
+    - Duplicate detection (dbt handles this)
+    - Business rules (dbt handles this)
+    """
+
+    # fields that must exist inside raw_data["current"]
+    REQUIRED_CURRENT_FIELDS = [
+        "time",
+        "temperature_2m",
+        "relative_humidity_2m",
+        "wind_speed_10m",
+        "precipitation",
+        "weather_code",
     ]
 
-    # acceptable value ranges
-    RANGES = {
-        "temperature": (-90, 60),
-        "humidity": (0, 100),
-        "wind_speed": (0, 200),
-        "precipitation": (0, 500),
-    }
-
-    MAX_AGE_MINUTES = 100
+    # top-level fields that must exist in the raw API response
+    REQUIRED_TOP_LEVEL_FIELDS = [
+        "latitude",
+        "longitude",
+        "timezone",
+        "current",
+    ]
 
     def __init__(self, logger=None):
         self.logger = logger
@@ -47,122 +62,188 @@ class WeatherValidator:
         if self.logger:
             getattr(self.logger, level)(message)
         else:
-            print(message)
+            print(f"[{level.upper()}] {message}")
 
-    # define rule for validaion
+    # ─── MAIN ENTRY POINT
 
-    def _rule_required_fields(self, df, mask):
+    def validate(self, rows):
+        """
+        Validates a list of raw extracted rows.
+        Each row contains:
+            source_id, location_id, location_name,
+            observation_at, raw_data (full API response)
 
-        missing_cols = [f for f in self.REQUIRED_FIELDS if f not in df.columns]
+        Returns (valid_rows, ValidationResult)
+        """
+        self.result = ValidationResult(total_rows=len(rows))
 
-        if missing_cols:
-            self._log("error", f"Missing required columns: {missing_cols}")
+        valid_rows = []
+        rejected_rows = []
 
-            return pd.Series([False] * len(df), index=df.index)
+        for row in rows:
+            passed, reason = self._validate_row(row)
+            if passed:
+                valid_rows.append(row)
+            else:
+                rejected_rows.append({**row, "rejection_reason": reason})
+                self._log("warning",
+                          f"  [rejected] {row.get('location_name', '?')} "
+                          f"→ {reason}"
+                          )
 
-        return mask
+        self.result.passed_rows = len(valid_rows)
+        self.result.rejected_rows = len(rejected_rows)
+        self.result.rejections = rejected_rows
 
-    def _rule_no_empty_location(self, df, mask):
+        self._print_summary()
+        return valid_rows, self.result
 
-        empty_cols = df["location"].isna() | (df["location"].astype(str).str.strip() == "")
+    # ─── ROW LEVEL VALIDATION
 
-        if empty_cols.any():
-            self._reject(df, empty_cols, "Empty location")
-            mask = mask & ~empty_cols
+    def _validate_row(self, row):
 
-        return mask
+        # rule 1 — required pipeline fields must exist
+        passed, reason = self._rule_required_pipeline_fields(row)
+        if not passed:
+            return False, reason
 
-    def _rule_numeric_types(self, df, mask):
+        # rule 2 — raw_data must be a dict
+        passed, reason = self._rule_raw_data_is_dict(row)
+        if not passed:
+            return False, reason
 
-        numeric_cols = ["temperature", "humidity", "wind_speed", "precipitation"]
+        # rule 3 — no API error in response
+        passed, reason = self._rule_no_api_error(row)
+        if not passed:
+            return False, reason
 
-        for col in numeric_cols:
-            if col not in df.columns:
-                continue
-            coerecd = pd.to_numeric(df[col], errors="coerce")
-            bad = coerecd.isna() & df[col].notna()
-            if bad.any():
-                self._reject(df, bad, f"Non-numeric value in '{col}'")
-                mask = mask & ~bad
-        return mask
+        # rule 4 — required top-level fields exist in raw_data
+        passed, reason = self._rule_top_level_fields(row)
+        if not passed:
+            return False, reason
 
-    def _rule_value_ranges(self, df, mask):
+        # rule 5 — current block exists and is a dict
+        passed, reason = self._rule_current_block_exists(row)
+        if not passed:
+            return False, reason
 
-        for col, (low, high) in self.RANGES.items():
-            if col not in df.columns:
-                continue
-            values = pd.to_numeric(df[col], errors="coerce")
-            bad = values.notna() & ((values < low) | (values > high))
-            if bad.any():
-                self._reject(df, bad, f"'{col}' out of range [{low}, {high}]")
-                mask = mask & ~bad
-        return mask
+        # rule 6 — required fields exist inside current block
+        passed, reason = self._rule_required_current_fields(row)
+        if not passed:
+            return False, reason
 
-    def _rule_no_future_timestamps(self, df, mask):
+        # rule 7 — observation_at is present and not in future
+        passed, reason = self._rule_valid_observation_at(row)
+        if not passed:
+            return False, reason
 
-        if "extracted_at" not in df.columns:
-            return mask
-        timestamps = pd.to_datetime(df["extracted_at"], errors="coerce")
-        now = pd.Timestamp.now()
-        bad = timestamps > now
-        if bad.any():
-            self._reject(df, bad, "Future timestamp in 'extracted_at'")
-            mask = mask & ~bad
-        return mask
+        # rule 8 — source_id and location_id are valid integers
+        passed, reason = self._rule_valid_ids(row)
+        if not passed:
+            return False, reason
 
-    def _rule_no_duplicate_location(self, df, mask):
-        """Each location should appear only once per extraction"""
-        duplicated = df.duplicated(subset=["location"], keep="first")
-        if duplicated.any():
-            self._reject(df, duplicated, "Duplicate location in same batch")
-            mask = mask & ~duplicated
-        return mask
+        return True, None
+
+    # ─── RULES ────────────────────────────────────────────
+
+    def _rule_required_pipeline_fields(self, row):
+
+        # Row must have source_id, location_id, raw_data
+
+        required = ["source_id", "location_id", "raw_data"]
+
+        missing = [f for f in required if f not in row or row[f] is None]
+
+        if missing:
+            return False, f"Missing pipeline fields: {missing}"
+
+        return True, None
+
+    def _rule_raw_data_is_dict(self, row):
+        # raw_data must be a dictionary
+        if not isinstance(row.get("raw_data"), dict):
+            return False, f"raw_data is not a dict — got {type(row.get('raw_data')).__name__}"
+        return True, None
+
+    def _rule_no_api_error(self, row):
+        # I response must not contain an error field
+        raw = row.get("raw_data", {})
+        if "error" in raw:
+            return False, f"API returned error: {raw.get('reason', raw.get('error'))}"
+        if "reason" in raw and "error" in str(raw.get("reason", "")).lower():
+            return False, f"API error reason: {raw['reason']}"
+        return True, None
+
+    def _rule_top_level_fields(self, row):
+        # Required top-level fields must exist in raw_data
+        raw = row.get("raw_data", {})
+        missing = [f for f in self.REQUIRED_TOP_LEVEL_FIELDS if f not in raw]
+        if missing:
+            return False, f"Missing top-level fields in raw_data: {missing}"
+        return True, None
+
+    def _rule_current_block_exists(self, row):
+        # raw_data['current'] must be a non-empty dict
+        current = row.get("raw_data", {}).get("current")
+        if not current:
+            return False, "raw_data['current'] is missing or empty"
+        if not isinstance(current, dict):
+            return False, f"raw_data['current'] is not a dict — got {type(current).__name__}"
+        return True, None
+
+    def _rule_required_current_fields(self, row):
+        # All required measurement fields must exist in current block
+        current = row.get("raw_data", {}).get("current", {})
+        missing = [
+            f for f in self.REQUIRED_CURRENT_FIELDS
+            if f not in current
+        ]
+        if missing:
+            return False, f"Missing current fields: {missing}"
+        return True, None
+
+    def _rule_valid_observation_at(self, row):
+        # observation_at must be present and not in the future
+        obs_at = row.get("observation_at")
+        if not obs_at:
+            return False, "observation_at is missing or empty"
+        try:
+            # parse and check it's not in the future
+            parsed = datetime.fromisoformat(str(obs_at))
+            now = datetime.now()
+            if parsed.tzinfo:
+                now = datetime.now(timezone.utc)
+            if parsed > now:
+                return False, f"observation_at is in the future: {obs_at}"
+        except ValueError:
+            return False, f"observation_at is not a valid datetime: {obs_at}"
+        return True, None
+
+    def _rule_valid_ids(self, row):
+
+        # source_id and location_id must be positive integers
+
+        for field_name in ["source_id", "location_id"]:
+            val = row.get(field_name)
+            if not isinstance(val, int) or val <= 0:
+                return False, f"{field_name} must be a positive integer — got {val}"
+        return True, None
+
+    # ─── SUMMARY
 
     def _print_summary(self):
         r = self.result
-        self._log("info", (
-            f"Validation complete — "
-            f"total: {r.total_rows} | "
-            f"passed: {r.passed_rows} | "
-            f"rejected: {r.rejected_rows} | "
-            f"rejection rate: {r.rejection_rate()}%"
-        ))
+        self._log("info",
+                  f"Validation complete — "
+                  f"total: {r.total_rows} | "
+                  f"passed: {r.passed_rows} | "
+                  f"rejected: {r.rejected_rows} | "
+                  f"rejection rate: {r.rejection_rate()}%"
+                  )
         if r.rejections:
-            self._log("warning", "Rejected rows:")
+            self._log("warning", f"Rejected rows saved for review:")
             for row in r.rejections:
                 self._log("warning",
-                          f"  {row.get('location', '?')} → {row.get('rejection_reason')}"
+                          f"  {row.get('location_name', '?'):<22} "
+                          f"→ {row.get('rejection_reason')}"
                           )
-
-    def _reject(self, df, bad_mask, reason):
-        rejected = df[bad_mask].copy()
-        rejected["rejection_reason"] = reason
-        self.result.rejections.extend(rejected.to_dict(orient="records"))
-        self._log("warning", f"Rejected {bad_mask.sum()} row(s) — {reason}")
-
-    def validate(self, rows):
-
-        self.result = ValidationResult(total_rows=len(rows))
-
-        df = pd.DataFrame(rows)
-
-        valid_mask = pd.Series([True] * len(df), index=df.index)
-
-        valid_mask = self._rule_required_fields(df, valid_mask)
-        valid_mask = self._rule_no_empty_location(df, valid_mask)
-        valid_mask = self._rule_numeric_types(df, valid_mask)
-        valid_mask = self._rule_value_ranges(df, valid_mask)
-        valid_mask = self._rule_no_future_timestamps(df, valid_mask)
-        valid_mask = self._rule_no_duplicate_location(df, valid_mask)
-
-        # split into valid and rejected
-        valid_df = df[valid_mask].reset_index(drop=True)
-        rejected_df = df[~valid_mask].reset_index(drop=True)
-
-        self.result.passed_rows = len(valid_df)
-        self.result.rejected_rows = len(rejected_df)
-
-        self._print_summary()
-
-        # return as list of dicts — same contract as extractor
-        return valid_df.to_dict(orient="records"), self.result

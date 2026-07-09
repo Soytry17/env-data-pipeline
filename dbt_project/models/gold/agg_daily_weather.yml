@@ -1,26 +1,59 @@
 version: 2
 
 models:
+
   - name: agg_daily_weather
-    description: "Daily aggregated weather stats per location — Gold layer"
+    description: "Daily weather aggregation by province for reporting and dashboards"
+
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - location_id
+            - observation_date
+
     columns:
-      - name: location
+
+      - name: location_id
         tests:
           - not_null
 
-      - name: date
+      - name: observation_date
         tests:
           - not_null
 
-      - name: total_readings
-        description: "Number of readings collected that day"
+      - name: location_name
+        tests:
+          - not_null
 
-      - name: day_classification
+      - name: region
+        tests:
+          - not_null
+
+      - name: season
         tests:
           - accepted_values:
               values:
-                - "Extreme Heat"
-                - "Hot and Humid"
-                - "Warm"
-                - "Mild"
-                - "Cool"
+                - rainy
+                - dry
+
+      - name: observations
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 1
+
+      - name: avg_temperature_c
+
+      - name: min_temperature_c
+
+      - name: max_temperature_c
+
+      - name: avg_humidity_pct
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 100
+
+      - name: total_precipitation_mm
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0

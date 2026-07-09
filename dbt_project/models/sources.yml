@@ -2,40 +2,40 @@ version: 2
 
 sources:
   - name: bronze
-    schema: bronze
     description: "Raw ingested data from the pipeline"
+    schema: bronze
     tables:
       - name: weather
-        description: "Raw weather readings from Open-Meteo API"
+        description: "Raw weather readings stored as JSONB — partitioned by year"
         columns:
           - name: id
             description: "Auto-incremented primary key"
-            tests:
-              - unique
-              - not_null
-          - name: location
-            description: "City name"
+          - name: source_id
+            description: "FK to config.sources (application-level)"
             tests:
               - not_null
-          - name: extracted_at
-            description: "Timestamp of the API reading"
+          - name: location_id
+            description: "FK to config.locations (application-level)"
             tests:
               - not_null
-          - name: temperature
-            description: "Temperature in Celsius"
+          - name: observation_at
+            description: "Timestamp of the weather reading from the API"
             tests:
-              - dbt_utils.accepted_range:
-                  min_value: -50
-                  max_value: 60
-          - name: humidity
-            description: "Relative humidity percentage"
+              - not_null
+          - name: raw_data
+            description: "Complete raw API response as JSONB"
             tests:
-              - dbt_utils.accepted_range:
-                  min_value: 0
-                  max_value: 100
-          - name: wind_speed
-            description: "Wind speed in km/h"
-            tests:
-              - dbt_utils.accepted_range:
-                  min_value: 0
-                  max_value: 200
+              - not_null
+          - name: ingested_at
+            description: "When this row was loaded into the database"
+
+  - name: config
+    description: "Pipeline configuration — sources and locations"
+    schema: config
+    tables:
+      - name: sources
+        description: "Registered API sources"
+      - name: locations
+        description: "25 Cambodian provinces"
+      - name: source_locations
+        description: "Many-to-many between sources and locations"

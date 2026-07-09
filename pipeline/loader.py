@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
-import pandas as pd
-import psycopg2.extras
-from utils.db import get_connection
-from utils.schema import CREATE_SCHEMAS, CREATE_BRONZE_WEATHER, CREATE_BRONZE_INDEXES
+import json
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from utils.db import get_connection
+from utils.schema import get_or_create_partition
 
 class BaseLoader(ABC):
     def __init__(self, logger=None):
@@ -30,92 +32,178 @@ class BaseLoader(ABC):
 
 
 class PostgreSQLLoader(BaseLoader):
-    # columns that map to the database table
-    COLUMNS = [
-        "location", "latitude", "longitude",
-        "extracted_at", "processed_at",
-        "temperature", "humidity", "wind_speed",
-        "precipitation", "weather_code",
-        "weather_description", "heat_index",
-        "comfort_level", "pipeline_version",
-    ]
+
+    INSERT_SQL = """
+        INSERT INTO bronze.weather (
+            source_id,
+            location_id,
+            observation_at,
+            raw_data,
+            ingested_at
+        ) VALUES (
+            %(source_id)s,
+            %(location_id)s,
+            %(observation_at)s,
+            %(raw_data)s,
+            NOW()
+        )
+    """
 
     def __init__(self, logger=None):
         super().__init__(logger)
-        self._ensure_table()            # create table if it doesn't exist
+        self._valid_source_ids   = set()
+        self._valid_location_ids = set()
+        self._load_valid_ids()
 
-    def _ensure_table(self):
+    # ─── LOAD VALID IDS
 
+    def _load_valid_ids(self):
+
+        conn = get_connection()
+        cur  = conn.cursor()
         try:
-            conn = get_connection()
-            cur  = conn.cursor()
-            cur.execute(CREATE_SCHEMAS)
-            cur.execute(CREATE_BRONZE_WEATHER)
-            cur.execute(CREATE_BRONZE_INDEXES)
-            conn.commit()
+            cur.execute("SELECT id FROM config.sources WHERE is_active = TRUE")
+            self._valid_source_ids = {row[0] for row in cur.fetchall()}
+
+            cur.execute("SELECT id FROM config.locations WHERE is_active = TRUE")
+            self._valid_location_ids = {row[0] for row in cur.fetchall()}
+
+            self._log("info",
+                f"Loaded {len(self._valid_source_ids)} source(s) and "
+                f"{len(self._valid_location_ids)} location(s) for FK validation"
+            )
+        finally:
             cur.close()
             conn.close()
-            self._log("info", "Bronze table ready (bronze_weather)")
-        except Exception as e:
-            self._log("error", f"Failed to create table: {e}")
-            raise
+
+    # ─── APPLICATION LEVEL FK VALIDATION
+
+    def _validate_ids(self, row):
+        """
+        Replaces database FK constraint.
+        Raises ValueError if IDs are not in config tables.
+        """
+        if row.get("source_id") not in self._valid_source_ids:
+            raise ValueError(
+                f"Invalid source_id: {row.get('source_id')} "
+                f"— not found in config.sources"
+            )
+        if row.get("location_id") not in self._valid_location_ids:
+            raise ValueError(
+                f"Invalid location_id: {row.get('location_id')} "
+                f"— not found in config.locations"
+            )
+
+    # ─── WRITE
 
     def _write(self, rows):
+        conn = get_connection()
+        cur  = conn.cursor()
 
-        df = pd.DataFrame(rows)
-
-        cols_to_insert = [c for c in self.COLUMNS if c in df.columns]
-        
-        df = df[cols_to_insert]
-
-        records = [tuple(row) for row in df.itertuples(index=False)]
-
-        insert_sql = f"""
-            INSERT INTO bronze.weather ({', '.join(cols_to_insert)})
-            VALUES %s
-        """
+        inserted  = 0
+        failed    = 0
 
         try:
-            conn = get_connection()
-            cur  = conn.cursor()
+            # ensure partitions exist for all years in this batch
+            self._ensure_partitions(cur, rows)
+            conn.commit()
 
-            # execute_values does batch insert efficiently
-            psycopg2.extras.execute_values(
-                cur, insert_sql, records, page_size=100
-            )
+            for row in rows:
+                try:
+                    # application-level FK check
+                    self._validate_ids(row)
+
+                    # prepare row for insert
+                    record = {
+                        "source_id":      row["source_id"],
+                        "location_id":    row["location_id"],
+                        "observation_at": row["observation_at"],
+                        "raw_data":       json.dumps(row["raw_data"]),
+                    }
+
+                    cur.execute(self.INSERT_SQL, record)
+                    inserted += 1
+
+                    self._log("info",
+                        f"  ✔ inserted '{row.get('location_name', row['location_id'])}' "
+                        f"→ observation_at: {row['observation_at']}"
+                    )
+
+                except ValueError as e:
+                    self._log("warning", f"  [skip] {e}")
+                    failed += 1
+
+                except Exception as e:
+                    self._log("error",
+                        f"  [error] Failed to insert "
+                        f"'{row.get('location_name', '?')}': {e}"
+                    )
+                    failed += 1
 
             conn.commit()
-            rows_inserted = cur.rowcount
-            cur.close()
-            conn.close()
 
             self._log("success",
-                f"Inserted {len(records)} row(s) into bronze_weather"
+                f"Load complete — "
+                f"inserted: {inserted} | "
+                f"failed: {failed} | "
+                f"total: {len(rows)}"
             )
-            return len(records)
+            return inserted
 
         except Exception as e:
-            self._log("error", f"Insert failed: {e}")
+            conn.rollback()
+            self._log("error", f"Load failed — rolling back: {e}")
             raise
 
-    def fetch_latest(self, limit=10):
-        try:
-            conn = get_connection()
-            cur  = conn.cursor()
-            cur.execute("""
-                SELECT location, extracted_at, temperature,
-                       humidity, weather_description, comfort_level
-                FROM   bronze.weather
-                ORDER  BY created_at DESC
-                LIMIT  %s
-            """, (limit,))
-            rows = cur.fetchall()
+        finally:
             cur.close()
             conn.close()
-            return rows
-        except Exception as e:
-            self._log("error", f"Fetch failed: {e}")
-            return []
+
+    # ─── PARTITION MANAGEMENT
+
+    def _ensure_partitions(self, cur, rows):
+        years_needed = set()
+
+        for row in rows:
+            obs_at = row.get("observation_at")
+            if obs_at:
+                try:
+                    year = int(str(obs_at)[:4])
+                    years_needed.add(year)
+                except (ValueError, TypeError):
+                    pass
+
+        for year in sorted(years_needed):
+            partition = get_or_create_partition(cur, year)
+            self._log("info", f"  partition ready: {partition}")
+
+    # ─── FETCH LATEST
+
+    def fetch_latest(self, limit=10):
+        conn = get_connection()
+        cur  = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT
+                    b.id,
+                    s.source_name,
+                    l.name              AS location,
+                    l.region,
+                    b.observation_at,
+                    b.ingested_at,
+                    b.raw_data->'current'->>'temperature_2m'  AS temperature,
+                    b.raw_data->'current'->>'relative_humidity_2m' AS humidity,
+                    b.raw_data->'current'->>'weather_code'    AS weather_code
+                FROM bronze.weather b
+                JOIN config.sources   s ON s.id = b.source_id
+                JOIN config.locations l ON l.id = b.location_id
+                ORDER BY b.ingested_at DESC
+                LIMIT %s
+            """, (limit,))
+            return cur.fetchall()
+        finally:
+            cur.close()
+            conn.close()
 
     def __str__(self):
-        return "PostgreSQLLoader → bronze_weather"
+        return "PostgreSQLLoader → bronze.weather"

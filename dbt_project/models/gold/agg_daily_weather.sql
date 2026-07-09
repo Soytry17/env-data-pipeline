@@ -1,63 +1,49 @@
 WITH silver AS (
 
-    SELECT * FROM {{ ref('stg_weather') }}
-
-),
-
-daily_stats AS (
-
-    SELECT
-        location,
-        reading_date                            AS date,
-
-        -- temperature stats
-        ROUND(AVG(temperature_c)::NUMERIC, 2)   AS avg_temp_c,
-        ROUND(MIN(temperature_c)::NUMERIC, 2)   AS min_temp_c,
-        ROUND(MAX(temperature_c)::NUMERIC, 2)   AS max_temp_c,
-
-        -- humidity stats
-        ROUND(AVG(humidity_pct)::NUMERIC, 2)    AS avg_humidity_pct,
-        ROUND(MIN(humidity_pct)::NUMERIC, 2)    AS min_humidity_pct,
-        ROUND(MAX(humidity_pct)::NUMERIC, 2)    AS max_humidity_pct,
-
-        -- wind stats
-        ROUND(AVG(wind_speed_kmh)::NUMERIC, 2)  AS avg_wind_speed_kmh,
-        ROUND(MAX(wind_speed_kmh)::NUMERIC, 2)  AS max_wind_speed_kmh,
-
-        -- precipitation
-        ROUND(SUM(precipitation_mm)::NUMERIC, 2) AS total_precipitation_mm,
-
-        -- heat index
-        ROUND(AVG(heat_index_c)::NUMERIC, 2)    AS avg_heat_index_c,
-        ROUND(MAX(heat_index_c)::NUMERIC, 2)    AS max_heat_index_c,
-
-        -- most common comfort level of the day
-        MODE() WITHIN GROUP (
-            ORDER BY comfort_level
-        )                                       AS dominant_comfort_level,
-
-        -- reading counts
-        COUNT(*)                                AS total_readings,
-        COUNT(DISTINCT reading_hour)            AS hours_covered
-
-    FROM silver
-    WHERE temperature_c IS NOT NULL
-    GROUP BY location, reading_date
+    SELECT *
+    FROM {{ ref('stg_weather') }}
 
 )
 
 SELECT
-    *,
-    -- classify the day overall
-    CASE
-        WHEN avg_temp_c >= 35 AND avg_humidity_pct >= 80 THEN 'Extreme Heat'
-        WHEN avg_temp_c >= 30 AND avg_humidity_pct >= 70 THEN 'Hot and Humid'
-        WHEN avg_temp_c >= 25                            THEN 'Warm'
-        WHEN avg_temp_c >= 15                            THEN 'Mild'
-        ELSE 'Cool'
-    END                                         AS day_classification,
 
-    NOW()                                       AS dbt_updated_at
+    location_id,
+    location_name,
+    region,
 
-FROM daily_stats
-ORDER BY date DESC, location
+    observation_date,
+
+    season,
+    is_rainy_season,
+
+    COUNT(*)                           AS observations,
+
+    AVG(temperature_c)                 AS avg_temperature_c,
+    MIN(temperature_c)                 AS min_temperature_c,
+    MAX(temperature_c)                 AS max_temperature_c,
+
+    AVG(humidity_pct)                  AS avg_humidity_pct,
+
+    SUM(precipitation_mm)              AS total_precipitation_mm,
+
+    AVG(wind_speed_kmh)                AS avg_wind_speed_kmh,
+    MAX(wind_gusts_kmh)                AS max_wind_gust_kmh,
+
+    AVG(pressure_hpa)                  AS avg_pressure_hpa,
+
+    AVG(cloud_cover_pct)               AS avg_cloud_cover_pct,
+
+    AVG(heat_index_c)                  AS avg_heat_index_c
+
+FROM silver
+
+GROUP BY
+
+    location_id,
+    location_name,
+    region,
+
+    observation_date,
+
+    season,
+    is_rainy_season

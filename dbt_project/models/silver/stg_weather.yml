@@ -2,26 +2,51 @@ version: 2
 
 models:
   - name: stg_weather
-    description: "Cleaned and deduplicated weather readings — Silver layer"
+    description: "Cleaned weather readings unpacked from JSONB — Silver layer"
     columns:
-      - name: id
-        tests:
-          - unique
-          - not_null
-
-      - name: location
+      - name: bronze_id
         tests:
           - not_null
 
-      - name: extracted_at
+      - name: location_id
         tests:
           - not_null
+
+      - name: source_id
+        tests:
+          - not_null
+
+      - name: observation_at
+        tests:
+          - not_null
+
+      - name: location_name
+        tests:
+          - not_null
+
+      - name: region
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - "Central"
+                - "Northern"
+                - "Highland"
+                - "Coastal"
+                - "Eastern"
 
       - name: temperature_c
-        description: "Temperature in Celsius — null if out of valid range"
+        description: "Temperature in Celsius — null if missing from API"
 
       - name: humidity_pct
-        description: "Humidity percentage 0–100"
+        description: "Relative humidity 0–100%"
+
+      - name: season
+        tests:
+          - accepted_values:
+              values:
+                - "rainy"
+                - "dry"
 
       - name: comfort_level
         tests:
