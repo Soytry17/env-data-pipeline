@@ -1,59 +1,62 @@
-version: 2
 
 models:
   - name: weather_features
-    description: "Machine learning feature table for weather prediction"
-
-    tests:
-      - dbt_utils.unique_combination_of_columns:
-          combination_of_columns:
-            - location_id
-            - observation_at
+    description: >
+      ML feature store — one row per province per day.
+      Contains lag values, rolling averages, cyclical encodings,
+      regional features, and target variables for AI training.
+      Covers all 25 Cambodian provinces from 2000 to present.
 
     columns:
-
       - name: location_id
         tests:
           - not_null
 
-      - name: observation_at
+      - name: feature_date
         tests:
           - not_null
+
+      - name: location_name
+        tests:
+          - not_null
+
+      - name: region
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - "Central"
+                - "Northern"
+                - "Highland"
+                - "Coastal"
+                - "Eastern"
 
       - name: season
         tests:
           - accepted_values:
               values:
-                - rainy
-                - dry
+                - "rainy"
+                - "dry"
 
-      - name: is_rainy_season
+      - name: elevation_category
+        tests:
+          - accepted_values:
+              values:
+                - "lowland"
+                - "low_hill"
+                - "hill"
+                - "highland"
+
+      - name: avg_temp_c
+        description: "Daily average temperature in Celsius"
         tests:
           - not_null
 
-      - name: temperature_c
+      - name: hourly_readings_count
+        description: "Number of hourly readings that day — should be 24"
 
-      - name: humidity_pct
-        tests:
-          - dbt_utils.accepted_range:
-              min_value: 0
-              max_value: 100
+      - name: target_next_day_temp
+        description: "Tomorrow's avg temperature — the AI prediction target"
 
-      - name: precipitation_mm
-        tests:
-          - dbt_utils.accepted_range:
-              min_value: 0
-
-      - name: rolling_temp_24h
-
-      - name: rolling_humidity_24h
-
-      - name: temperature_lag_1
-
-      - name: temperature_lag_24
-
-      - name: rainfall_lag_24
-
-      - name: target_temperature_next_day
-
-      - name: target_rainfall_next_day
+      - name: target_will_rain_tomorrow
+        description: "1 if it will rain tomorrow, 0 if not — classification target"

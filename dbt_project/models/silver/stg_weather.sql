@@ -1,6 +1,10 @@
--- Silver layer: unpack JSONB → clean typed columns
--- joins config tables to enrich with location metadata
-
+{{ config(
+    materialized = 'view',
+    indexes = [
+        {'columns': ['location_id', 'observation_date']},
+        {'columns': ['observation_year']},
+    ]
+) }}
 WITH bronze AS (
 
     SELECT * FROM {{ source('bronze', 'weather') }}

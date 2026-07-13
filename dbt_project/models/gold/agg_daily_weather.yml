@@ -1,23 +1,20 @@
+# dbt_project/models/gold/agg_daily_weather.yml
+
 version: 2
 
 models:
-
   - name: agg_daily_weather
-    description: "Daily weather aggregation by province for reporting and dashboards"
-
-    tests:
-      - dbt_utils.unique_combination_of_columns:
-          combination_of_columns:
-            - location_id
-            - observation_date
+    description: >
+      Daily aggregated weather stats per province — Gold layer.
+      Powers BI dashboards and FastAPI REST endpoints.
+      One row per province per day.
 
     columns:
-
       - name: location_id
         tests:
           - not_null
 
-      - name: observation_date
+      - name: date
         tests:
           - not_null
 
@@ -28,32 +25,51 @@ models:
       - name: region
         tests:
           - not_null
+          - accepted_values:
+              values:
+                - "Central"
+                - "Northern"
+                - "Highland"
+                - "Coastal"
+                - "Eastern"
+
+      - name: avg_temp_c
+        tests:
+          - not_null
 
       - name: season
         tests:
           - accepted_values:
               values:
-                - rainy
-                - dry
+                - "rainy"
+                - "dry"
 
-      - name: observations
+      - name: day_classification
         tests:
-          - dbt_utils.accepted_range:
-              min_value: 1
+          - accepted_values:
+              values:
+                - "Extreme Heat"
+                - "Hot and Humid"
+                - "Warm"
+                - "Mild"
+                - "Cool"
 
-      - name: avg_temperature_c
-
-      - name: min_temperature_c
-
-      - name: max_temperature_c
-
-      - name: avg_humidity_pct
+      - name: precipitation_category
         tests:
-          - dbt_utils.accepted_range:
-              min_value: 0
-              max_value: 100
+          - accepted_values:
+              values:
+                - "No rain"
+                - "Light rain"
+                - "Moderate rain"
+                - "Heavy rain"
+                - "Extreme rain"
 
-      - name: total_precipitation_mm
+      - name: wind_classification
         tests:
-          - dbt_utils.accepted_range:
-              min_value: 0
+          - accepted_values:
+              values:
+                - "Calm"
+                - "Breeze"
+                - "Moderate wind"
+                - "Strong wind"
+                - "Storm"

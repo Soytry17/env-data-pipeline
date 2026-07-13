@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from typing import List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 
 @dataclass
@@ -203,20 +203,32 @@ class WeatherValidator:
         return True, None
 
     def _rule_valid_observation_at(self, row):
-        # observation_at must be present and not in the future
+        # observation_at must be present and not in the future.
         obs_at = row.get("observation_at")
         if not obs_at:
             return False, "observation_at is missing or empty"
+
         try:
-            # parse and check it's not in the future
             parsed = datetime.fromisoformat(str(obs_at))
-            now = datetime.now()
-            if parsed.tzinfo:
-                now = datetime.now(timezone.utc)
-            if parsed > now:
-                return False, f"observation_at is in the future: {obs_at}"
         except ValueError:
             return False, f"observation_at is not a valid datetime: {obs_at}"
+
+        offset_seconds = row.get("raw_data", {}).get("utc_offset_seconds", 0) or 0
+
+        if parsed.tzinfo is None:
+            # naive local wall-clock time → shift to UTC
+            parsed_utc = (
+                parsed - timedelta(seconds=offset_seconds)
+            ).replace(tzinfo=timezone.utc)
+        else:
+            parsed_utc = parsed.astimezone(timezone.utc)
+
+        now_utc = datetime.now(timezone.utc)
+
+        # small grace window for clock skew and reporting-interval rounding
+        if parsed_utc > now_utc + timedelta(minutes=5):
+            return False, f"observation_at is in the future: {obs_at}"
+
         return True, None
 
     def _rule_valid_ids(self, row):

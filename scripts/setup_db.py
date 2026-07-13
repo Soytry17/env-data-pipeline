@@ -14,6 +14,8 @@ from utils.db import get_connection
 conn = get_connection()
 cur  = conn.cursor()
 
+
+
 cur.execute("""
     SELECT schema_name
     FROM information_schema.schemata

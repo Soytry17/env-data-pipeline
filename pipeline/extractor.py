@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import requests
 import os
 import sys
+import traceback
 
 from repository.location_repository import get_active_locations
 from repository.source_repository import get_source
@@ -74,8 +75,10 @@ class APIExtractor(BaseExtractor):
                     rows.append(row)
             except Exception as e:
                 self._log("warning",
-                    f"Failed to fetch '{location['name']}': {e}"
+                    f"Failed to fetch '{location['name']}': "
+                    f"[{type(e).__name__}] {e!r}"
                 )
+                self._log("warning", traceback.format_exc())
                 failed.append(location["name"])
 
         self._log("info",
@@ -126,6 +129,7 @@ class APIExtractor(BaseExtractor):
             "observation_at": observation_at,
             "raw_data":     raw_response,
         }
+
 
         self._log("info",
             f"  ✔ {location['name']:<22} "

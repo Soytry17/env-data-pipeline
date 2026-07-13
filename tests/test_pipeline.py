@@ -1,8 +1,5 @@
-# tests/test_pipeline.py
-
 from pipeline.extractor import APIExtractor
 from pipeline.validator import WeatherValidator
-from pipeline.transformer import WeatherTransformer
 from pipeline.loader import PostgreSQLLoader
 from pipeline.pipeline import Pipeline
 from utils.db import test_connection
@@ -17,7 +14,6 @@ if not test_connection():
 pipeline = Pipeline(
     extractor   = APIExtractor(source="Open-Meteo"),
     validator   = WeatherValidator(),
-    transformer = WeatherTransformer(),
     loader      = PostgreSQLLoader(),
     name        = "Weather Pipeline"
 )

@@ -1,0 +1,22 @@
+dbt_project:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('DB_HOST', 'host.docker.internal') }}"
+      port: "{{ env_var('DB_PORT', '5432') | int }}"
+      dbname: "{{ env_var('DB_NAME', 'weather_db') }}"
+      user: "{{ env_var('DB_USER', 'soytry_pipline') }}"
+      password: "{{ env_var('DB_PASSWORD', 'soytry_pipline') }}"
+      schema: public
+      threads: 4
+
+    prod:
+      type: postgres
+      host: "{{ env_var('DB_HOST') }}"
+      port: "{{ env_var('DB_PORT') | int }}"
+      dbname: "{{ env_var('DB_NAME') }}"
+      user: "{{ env_var('DB_USER') }}"
+      password: "{{ env_var('DB_PASSWORD') }}"
+      schema: public
+      threads: 8
