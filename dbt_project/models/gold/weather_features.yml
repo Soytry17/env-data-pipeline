@@ -1,0 +1,62 @@
+
+models:
+  - name: weather_features
+    description: >
+      ML feature store — one row per province per day.
+      Contains lag values, rolling averages, cyclical encodings,
+      regional features, and target variables for AI training.
+      Covers all 25 Cambodian provinces from 2000 to present.
+
+    columns:
+      - name: location_id
+        tests:
+          - not_null
+
+      - name: feature_date
+        tests:
+          - not_null
+
+      - name: location_name
+        tests:
+          - not_null
+
+      - name: region
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - "Central"
+                - "Northern"
+                - "Highland"
+                - "Coastal"
+                - "Eastern"
+
+      - name: season
+        tests:
+          - accepted_values:
+              values:
+                - "rainy"
+                - "dry"
+
+      - name: elevation_category
+        tests:
+          - accepted_values:
+              values:
+                - "lowland"
+                - "low_hill"
+                - "hill"
+                - "highland"
+
+      - name: avg_temp_c
+        description: "Daily average temperature in Celsius"
+        tests:
+          - not_null
+
+      - name: hourly_readings_count
+        description: "Number of hourly readings that day — should be 24"
+
+      - name: target_next_day_temp
+        description: "Tomorrow's avg temperature — the AI prediction target"
+
+      - name: target_will_rain_tomorrow
+        description: "1 if it will rain tomorrow, 0 if not — classification target"

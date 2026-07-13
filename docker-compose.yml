@@ -1,0 +1,175 @@
+version: '3.8'
+
+# ── shared environment variables ──────────────────────────
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  image: env-data-pipeline:latest
+  environment:
+    &airflow-common-env
+    # airflow core
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: 1
+
+    # celery
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres-airflow:5432/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+
+    # webserver
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+    AIRFLOW__WEBSERVER__SECRET_KEY: 'your-secret-key-change-this'
+
+    # your pipeline DB credentials from .env
+    DB_HOST: ${DB_HOST}
+    DB_PORT: ${DB_PORT}
+    DB_NAME: ${DB_NAME}
+    DB_USER: ${DB_USER}
+    DB_PASSWORD: ${DB_PASSWORD}
+
+    # python path
+    PYTHONPATH: /opt/airflow/project
+
+  volumes:
+    - ./airflow-config/dags:/opt/airflow/dags
+    - ./airflow-config/logs:/opt/airflow/logs
+    - ./airflow-config/plugins:/opt/airflow/plugins
+    - .:/opt/airflow/project
+    - ~/.dbt:/home/airflow/.dbt
+  depends_on:
+    postgres-airflow:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+
+# ── services ──────────────────────────────────────────────
+services:
+
+  # ── Airflow metadata database (separate from your pipeline DB)
+  postgres-airflow:
+    image: postgres:15
+    container_name: postgres-airflow
+    environment:
+      POSTGRES_USER:     airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB:       airflow
+    volumes:
+      - postgres-airflow-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # ── Redis (Celery broker)
+  redis:
+    image: redis:7.2
+    container_name: redis
+    expose:
+      - 6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 30s
+      retries: 50
+      start_period: 30s
+    restart: always
+
+  # ── Airflow webserver
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+
+  # ── Airflow scheduler
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+
+  # ── Airflow worker (runs your tasks)
+  airflow-worker:
+    <<: *airflow-common
+    container_name: airflow-worker
+    command: celery worker
+    environment:
+      <<: *airflow-common-env
+      DUMB_INIT_SETSID: "0"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - 'celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+
+  # ── Airflow init (runs once to set up DB and admin user)
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db upgrade
+        airflow users create \
+          --username admin \
+          --password admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com
+        airflow pools set weather_ingest_pool 10 "Open-Meteo API pool"
+    restart: on-failure
+
+
+  # ── Your pipeline PostgreSQL database
+  # NOTE: only add this if you want postgres in Docker too
+  # if you have postgres installed locally, remove this service
+  # and point DB_HOST in .env to host.docker.internal
+#  postgres-pipeline:
+#    image: postgres:15
+#    container_name: postgres-pipeline
+#    environment:
+#      POSTGRES_USER:     ${DB_USER}
+#      POSTGRES_PASSWORD: ${DB_PASSWORD}
+#      POSTGRES_DB:       ${DB_NAME}
+#    ports:
+#      - "5433:5432"         # expose on 5433 to avoid conflict with local postgres
+#    volumes:
+#      - postgres-pipeline-data:/var/lib/postgresql/data
+#    healthcheck:
+#      test: ["CMD", "pg_isready", "-U", "${DB_USER}"]
+#      interval: 10s
+#      retries: 5
+#    restart: always
+
+
+# ── volumes ───────────────────────────────────────────────
+volumes:
+  postgres-airflow-data:
+  postgres-pipeline-data:

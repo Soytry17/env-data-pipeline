@@ -1,0 +1,41 @@
+version: 2
+
+sources:
+  - name: bronze
+    description: "Raw ingested data from the pipeline"
+    schema: bronze
+    tables:
+      - name: weather
+        description: "Raw weather readings stored as JSONB — partitioned by year"
+        columns:
+          - name: id
+            description: "Auto-incremented primary key"
+          - name: source_id
+            description: "FK to config.sources (application-level)"
+            tests:
+              - not_null
+          - name: location_id
+            description: "FK to config.locations (application-level)"
+            tests:
+              - not_null
+          - name: observation_at
+            description: "Timestamp of the weather reading from the API"
+            tests:
+              - not_null
+          - name: raw_data
+            description: "Complete raw API response as JSONB"
+            tests:
+              - not_null
+          - name: ingested_at
+            description: "When this row was loaded into the database"
+
+  - name: config
+    description: "Pipeline configuration — sources and locations"
+    schema: config
+    tables:
+      - name: sources
+        description: "Registered API sources"
+      - name: locations
+        description: "25 Cambodian provinces"
+      - name: source_locations
+        description: "Many-to-many between sources and locations"
